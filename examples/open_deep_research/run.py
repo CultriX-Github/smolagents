@@ -1,16 +1,12 @@
-#!/usr/bin/env python3
+# === run.py ===
 
 import argparse
 import os
 import threading
-import asyncio
-from concurrent.futures import ThreadPoolExecutor
-from functools import lru_cache
+import logging
 
 from dotenv import load_dotenv
 from huggingface_hub import login
-from requests_cache import install_cache
-
 from scripts.text_inspector_tool import TextInspectorTool
 from scripts.text_web_browser import (
     ArchiveSearchTool,
@@ -35,20 +31,48 @@ from mcp import StdioServerParameters
 
 # ------------------------ Configuration & Initialization ------------------------
 
-# Initialize caching for web requests to improve performance
-install_cache('web_cache', backend='memory', expire_after=300)  # Cache expires after 5 minutes
+# Initialize logging
+logger = logging.getLogger("smolagents")
+logger.setLevel(logging.DEBUG)  # Capture all levels of logs
+log_handler = logging.StreamHandler()
+log_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
+log_handler.setFormatter(log_formatter)
+logger.addHandler(log_handler)
 
-# Load environment variables from .env file
+# Define a thread-safe list to store logs (optional, if needed elsewhere)
+agent_logs = []
+log_lock = threading.Lock()
+
+class ListHandler(logging.Handler):
+    """
+    Custom logging handler to append logs to a list.
+    """
+    def __init__(self, log_list):
+        super().__init__()
+        self.log_list = log_list
+
+    def emit(self, record):
+        with log_lock:
+            log_entry = self.format(record)
+            self.log_list.append(log_entry)
+
+# Attach the custom handler to capture logs
+list_handler = ListHandler(agent_logs)
+list_handler.setFormatter(log_formatter)
+logger.addHandler(list_handler)
+
+# Load environment variables
 load_dotenv(override=True)
 
-# Authenticate with Hugging Face Hub using the token from environment variables
+# Authenticate with Hugging Face Hub
 hf_token = os.getenv("HF_TOKEN")
 if hf_token:
     login(hf_token)
+    logger.info("Logged into Hugging Face Hub.")
 else:
-    raise EnvironmentError("HF_TOKEN not found in environment variables.")
+    logger.warning("HF_TOKEN not found. Proceeding without authentication.")
 
-# Configure the SearXNG MCP server (Assuming it's running externally)
+# Define MCP server parameters with the custom endpoint
 server_parameters = StdioServerParameters(
     command="",  # No command since MCP is external
     args=[],      # No args needed
@@ -62,13 +86,29 @@ server_parameters = StdioServerParameters(
 # Define authorized imports to limit agent capabilities
 AUTHORIZED_IMPORTS = [
     "requests",
+    "zipfile",
     "os",
-    "json",
-    "bs4",
     "pandas",
     "numpy",
+    "sympy",
+    "json",
+    "bs4",
+    "pubchempy",
+    "xml",
+    "yahoo_finance",
+    "Bio",
+    "sklearn",
+    "scipy",
+    "pydub",
+    "io",
+    "PIL",
+    "chess",
+    "PyPDF2",
+    "pptx",
     "torch",
-    # Add more as needed, but keep it minimal for performance
+    "datetime",
+    "fractions",
+    "csv",
 ]
 
 # User-Agent string for web requests to simulate a real browser
@@ -93,13 +133,7 @@ BROWSER_CONFIG = {
 # Ensure the downloads folder exists
 os.makedirs(f"./{BROWSER_CONFIG['downloads_folder']}", exist_ok=True)
 
-# Lock for thread-safe operations
-append_answer_lock = threading.Lock()
-
-# Global variable to hold the singleton agent instance
-agent_instance = None
-
-# Custom role conversions for the model
+# Define custom role conversions for the model
 custom_role_conversions = {"tool-call": "assistant", "tool-response": "user"}
 
 # ------------------------------ Argument Parsing -------------------------------
@@ -128,108 +162,95 @@ def parse_args():
 
 def create_agent(model_id="o1"):
     """
-    Create and return a singleton agent instance.
+    Create and return an agent instance configured to use the custom MCP server.
     """
-    global agent_instance
-    if agent_instance is None:
-        # Initialize tool collection from the MCP server
-        with ToolCollection.from_mcp(server_parameters) as tool_collection:
-            # Define model parameters with optimized settings
-            model_params = {
-                "model_id": model_id,
-                "custom_role_conversions": custom_role_conversions,
-                "max_completion_tokens": 4096,  # Reduced from 8192 for better performance
-                "temperature": 0.7,
-            }
-            if model_id == "o1":
-                model_params["reasoning_effort"] = "high"
+    # Initialize tool collection from the custom MCP server
+    with ToolCollection.from_mcp(server_parameters) as tool_collection:
+        # Define model parameters with optimized settings
+        model_params = {
+            "model_id": model_id,
+            "custom_role_conversions": custom_role_conversions,
+            "max_completion_tokens": 4096,  # Reduced from 8192 for better performance
+            "temperature": 0.7,
+        }
+        if model_id == "o1":
+            model_params["reasoning_effort"] = "high"
 
-            # Initialize the LLM model
-            model = LiteLLMModel(**model_params)
+        # Initialize the LLM model
+        model = LiteLLMModel(**model_params)
+        logger.info(f"Initialized LiteLLMModel with model_id={model_id}")
 
-            text_limit = 100000  # Define text inspection limit
+        text_limit = 100000  # Define text inspection limit
 
-            # Initialize the web browser with the optimized configuration
-            browser = SimpleTextBrowser(**BROWSER_CONFIG)
+        # Initialize the web browser with the optimized configuration
+        browser = SimpleTextBrowser(**BROWSER_CONFIG)
+        logger.info("Initialized SimpleTextBrowser with custom configuration.")
 
-            # Define web tools with optimized settings
-            WEB_TOOLS = [
-                GoogleSearchTool(provider="serper"),
-                VisitTool(browser),
-                PageUpTool(browser),
-                PageDownTool(browser),
-                FinderTool(browser),
-                FindNextTool(browser),
-                ArchiveSearchTool(browser),
-                TextInspectorTool(model, text_limit),
-            ]
+        # Define web tools with optimized settings
+        WEB_TOOLS = [
+            GoogleSearchTool(provider="serper"),
+            VisitTool(browser),
+            PageUpTool(browser),
+            PageDownTool(browser),
+            FinderTool(browser),
+            FindNextTool(browser),
+            ArchiveSearchTool(browser),
+            TextInspectorTool(model, text_limit),
+        ]
+        logger.info("Initialized web tools for ToolCallingAgent.")
 
-            # Initialize the ToolCallingAgent with optimized parameters
-            text_webbrowser_agent = ToolCallingAgent(
-                model=model,
-                tools=WEB_TOOLS + tool_collection.tools,  # Combine web tools with MCP tools
-                max_steps=10,             # Reduced from 20
-                verbosity_level=1,        # Reduced from 2
-                planning_interval=4,
-                name="search_agent",
-                description=(
-                    """A team member that will search the internet to answer your question.
-                    Ask all questions that require browsing the web using complete sentences.
-                    Provide as much context as possible, especially if searching within a specific timeframe.
-                    """
-                ),
-                provide_run_summary=True,
-            )
+        # Initialize the ToolCallingAgent with optimized parameters
+        text_webbrowser_agent = ToolCallingAgent(
+            model=model,
+            tools=WEB_TOOLS + tool_collection.tools,  # Combine web tools with MCP tools
+            max_steps=10,             # Reduced from 20
+            verbosity_level=2,        # Set to 2 for detailed logs
+            planning_interval=4,
+            name="search_agent",
+            description=(
+                """A team member that will search the internet to answer your question.
+                Ask all questions that require browsing the web using complete sentences.
+                Provide as much context as possible, especially if searching within a specific timeframe.
+                """
+            ),
+            provide_run_summary=True,
+        )
+        logger.info("Initialized ToolCallingAgent.")
 
-            # Enhance the agent's prompt with additional instructions
-            text_webbrowser_agent.prompt_templates["managed_agent"]["task"] += (
-                """ You can navigate to .txt online files.
-                If a non-HTML page is in another format, especially .pdf or a YouTube video, use the 'inspect_file_as_text' tool to inspect it.
-                Additionally, if more information is needed to answer the question after some searching, use final_answer with your request for clarification as an argument."""
-            )
+        # Enhance the agent's prompt with additional instructions
+        text_webbrowser_agent.prompt_templates["managed_agent"]["task"] += (
+            """You can navigate to .txt online files.
+            If a non-HTML page is in another format, especially .pdf or a YouTube video, use the 'inspect_file_as_text' tool to inspect it.
+            Additionally, if more information is needed to answer the question after some searching, use final_answer with your request for clarification as an argument."""
+        )
+        logger.debug("Enhanced Agent prompt with additional instructions.")
 
-            # Initialize the manager agent with optimized parameters
-            manager_agent = CodeAgent(
-                model=model,
-                tools=[visualizer, TextInspectorTool(model, text_limit)],
-                max_steps=12,                # Reduced from higher value
-                verbosity_level=1,           # Reduced from 2
-                additional_authorized_imports=AUTHORIZED_IMPORTS,
-                planning_interval=4,
-                managed_agents=[text_webbrowser_agent],
-            )
+        # Initialize the manager agent with optimized parameters
+        manager_agent = CodeAgent(
+            model=model,
+            tools=[visualizer, TextInspectorTool(model, text_limit)],
+            max_steps=12,                # Reduced from higher value
+            verbosity_level=2,           # Detailed logs
+            additional_authorized_imports=AUTHORIZED_IMPORTS,
+            planning_interval=4,
+            managed_agents=[text_webbrowser_agent],
+        )
+        logger.info("Initialized Manager CodeAgent.")
 
-            # Assign the manager agent to the global instance
-            agent_instance = manager_agent
-
-    return agent_instance
-
-# ---------------------------- Asynchronous Execution ---------------------------
-
-async def async_run_agent(agent, question):
-    """
-    Asynchronously run the agent with the given question.
-    """
-    loop = asyncio.get_event_loop()
-    return await loop.run_in_executor(None, agent.run, question)
+        return manager_agent
 
 # ------------------------------- Main Function ---------------------------------
 
 def main():
-    """
-    Main function to parse arguments, create agent, and get the answer.
-    """
     args = parse_args()
+    logger.info(f"Received question: {args.question} with model_id={args.model_id}")
+
     agent = create_agent(model_id=args.model_id)
 
-    # Use ThreadPoolExecutor to run the agent concurrently
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        future = executor.submit(agent.run, args.question)
-        answer = future.result()
+    answer = agent.run(args.question)
 
     print(f"Got this answer: {answer}")
-
-# ------------------------------ Entry Point ------------------------------------
+    logger.info("Agent has completed processing the question.")
 
 if __name__ == "__main__":
     main()
