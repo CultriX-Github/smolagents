@@ -78,8 +78,8 @@ server_parameters = StdioServerParameters(
     args=[],      # No args needed
     env={
         "SEARXNG_URL": "https://search.endorisk.nl",
-        "SEARXNG_USERNAME": "",  # Optional
-        "SEARXNG_PASSWORD": ""   # Optional
+        "SEARXNG_USERNAME": None,  # Optional
+        "SEARXNG_PASSWORD": None   # Optional
     }
 )
 
