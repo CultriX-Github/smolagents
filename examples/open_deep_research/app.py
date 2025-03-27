@@ -2,7 +2,6 @@
 
 import os
 import gradio as gr
-import logging
 from run import create_agent, agent_logs, log_lock
 from smolagents.gradio_ui import GradioUI  # Ensure this is the correct import based on smolagents' version
 
@@ -57,20 +56,20 @@ def build_app():
         # Initialize the agent
         agent = create_agent()
         
-        # Initialize GradioUI with the agent (optional, based on smolagents' capabilities)
+        # Initialize GradioUI with the agent (if applicable)
         ui = GradioUI(agent)
         
         # Placeholder for logs
         log_textbox = gr.Textbox(label="Agent Logs", lines=20, interactive=False)
+        log_textbox.style(container=False)  # Optional: Improve aesthetics
         
         # Function to get the answer and logs
         def get_answer(question):
-            agent_logs.clear()  # Clear previous logs
+            with log_lock:
+                agent_logs.clear()  # Clear previous logs
             answer = agent.run(question)
-            
             with log_lock:
                 logs = "\n".join(agent_logs)
-            
             return answer, logs
         
         # Ask Question Section
