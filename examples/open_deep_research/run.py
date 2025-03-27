@@ -39,7 +39,7 @@ log_formatter = logging.Formatter('%(asctime)s - %(levelname)s - %(message)s')
 log_handler.setFormatter(log_formatter)
 logger.addHandler(log_handler)
 
-# Define a thread-safe list to store logs (optional, if needed elsewhere)
+# Define a thread-safe list to store logs
 agent_logs = []
 log_lock = threading.Lock()
 
@@ -219,9 +219,9 @@ def create_agent(model_id="o1"):
 
         # Enhance the agent's prompt with additional instructions
         text_webbrowser_agent.prompt_templates["managed_agent"]["task"] += (
-            """You can navigate to .txt online files.
+            """ You can navigate to .txt online files.
             If a non-HTML page is in another format, especially .pdf or a YouTube video, use the 'inspect_file_as_text' tool to inspect it.
-            Additionally, if more information is needed to answer the question after some searching, use final_answer with your request for clarification as an argument."""
+            Additionally, if more information is needed to answer the question after some searching, use `final_answer` with your request for clarification as an argument."""
         )
         logger.debug("Enhanced Agent prompt with additional instructions.")
 
