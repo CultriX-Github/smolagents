@@ -74,14 +74,14 @@ else:
 
 # Define MCP server parameters with the custom endpoint
 server_parameters = StdioServerParameters(
-    command="",  # No command since MCP is external
-    args=[],      # No args needed
     env={
         "SEARXNG_URL": "https://search.endorisk.nl",
-        "SEARXNG_USERNAME": None,  # Optional
-        "SEARXNG_PASSWORD": None   # Optional
+        # Remove these or set them to an empty string
+        "SEARXNG_USERNAME": "",
+        "SEARXNG_PASSWORD": "",
     }
 )
+
 
 # Define authorized imports to limit agent capabilities
 AUTHORIZED_IMPORTS = [
