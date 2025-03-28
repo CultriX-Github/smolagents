@@ -74,11 +74,12 @@ else:
 
 # Define MCP server parameters with the custom endpoint
 server_parameters = StdioServerParameters(
+    command="echo",  # A harmless dummy command
+    args=["No actual command necessary"],  # Or you can pass an empty list
     env={
         "SEARXNG_URL": "https://search.endorisk.nl",
-        # Remove these or set them to an empty string
         "SEARXNG_USERNAME": "",
-        "SEARXNG_PASSWORD": "",
+        "SEARXNG_PASSWORD": ""
     }
 )
 
